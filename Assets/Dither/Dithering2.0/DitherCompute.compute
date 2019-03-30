@@ -1,0 +1,68 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+Texture2D<float4> ImageInput;
+float2 flip;
+int Downsample;
+float Multiplier;
+
+StructuredBuffer<int> Palette;
+int PaletteLength = 16;
+
+StructuredBuffer<float> Dither8x8;
+int DitherLength = 64;
+
+float ColourDiff(float3 a, float3 b) {
+	int diffR = (int)((a.r * 255.0f) - (b.r * 255.0f));
+	int diffG = (int)((a.g * 255.0f) - (b.g * 255.0f));
+	int diffB = (int)((a.b * 255.0f) - (b.b * 255.0f));
+
+	return diffR * diffR +
+		diffG * diffG +
+		diffB * diffB;
+}
+
+float4 ColourFromHex(int hex) {
+	return float4(
+		((float)((hex >> 16) & 0xFF)) / 255.0f,
+		((float)((hex >> 8) & 0xFF)) / 255.0f,
+		((float)(hex & 0xFF)) / 255.0f,
+		1.0f
+	);
+}
+
+float4 GetClosestPaletteColour(float4 target) {
+	float4 close = ColourFromHex(Palette[0]);
+
+	for (int i = 0; i < PaletteLength; i++) {
+		float4 c = ColourFromHex(Palette[i]);
+		if (ColourDiff(c.rgb, target.rgb) < ColourDiff(close.rgb, target.rgb)) {
+			close = c;
+		}
+	}
+	return close;
+}
+
+float Clamp01(float x) {
+	return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x);
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+	int x = id.x;
+	int y = id.y;
+	float factor = Dither8x8[(x & 7) + ((y & 7) << 3)];
+
+	float4 c = ImageInput[float2(x << Downsample, y << Downsample)];
+	float z = 64.0f / 255.0f;
+	float r = Clamp01(c.r + factor * z);
+	float g = Clamp01(c.g + factor * z);
+	float b = Clamp01(c.b + factor * z);
+
+	float4 result = GetClosestPaletteColour(float4(r, g, b, 1.0));
+	//result = factor * z;
+	Result[id.xy] = result;
+}
