@@ -1,0 +1,102 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+int ResultW;
+int ResultH;
+Texture2D<float4> ImageInput;
+int ImageInputW;
+int ImageInputH;
+float2 flip;
+int Downsample;
+
+StructuredBuffer<int> Palette;
+int PaletteLength = 16;
+
+StructuredBuffer<float> Dither8x8;
+
+// @return magnitude of the difference between two colours.
+float ColourDiff(float3 a, float3 b)
+{
+	int diffR = (int)((a.r * 255.0f) - (b.r * 255.0f));
+	int diffG = (int)((a.g * 255.0f) - (b.g * 255.0f));
+	int diffB = (int)((a.b * 255.0f) - (b.b * 255.0f));
+
+	return diffR * diffR +
+		diffG * diffG +
+		diffB * diffB;
+}
+
+float4 ColourFromHex(int hex)
+{
+	return float4(
+		((float)((hex >> 16) & 0xFF)) / 255.0f,
+		((float)((hex >> 8) & 0xFF)) / 255.0f,
+		((float)(hex & 0xFF)) / 255.0f,
+		1.0f
+	);
+}
+
+float4 GetClosestPaletteColour(float4 target)
+{
+    // Get colour from palette.
+	float4 close = ColourFromHex(Palette[0]);
+
+    // Find colour of least difference.
+    //
+    // NOTE: this could be optimised by sorting the palette's colour list and
+    //       performing a binary search.
+    //
+	for (int i = 0; i < PaletteLength; i++)
+    {
+		float4 c = ColourFromHex(Palette[i]);
+
+        float diff0 = ColourDiff(c.rgb, target.rgb);
+        float diff1 = ColourDiff(close.rgb, target.rgb);
+
+		if (diff0 < diff1)
+			close = c;
+	}
+
+	return close;
+}
+
+// @return given value clamped between range of 0 to 1.
+float Clamp01(float x)
+{
+    return clamp(x, 0.0f, 1.0f);
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    // Input coordinates.
+    int xi = (int)floor((float)id.x / (float)ResultW * (float)ImageInputW);
+    int yi = (int)floor((float)id.y / (float)ResultH * (float)ImageInputH);
+
+    // Output coordinates.
+    int xo = id.x;
+    int yo = id.y;
+
+    // Input image pixel
+	float4 c = ImageInput[float2(xi, yi)];
+
+	const float threshold = 64.0f / 255.0f;
+
+    // Get value for this pixel from the dither matrix.
+	float factor = Dither8x8[(xo & 7) + ((yo & 7) << 3)];
+
+    // Adjust the required colour using the value from the dither matrix.
+	float r = Clamp01(c.r + factor * threshold);
+	float g = Clamp01(c.g + factor * threshold);
+	float b = Clamp01(c.b + factor * threshold);
+
+    // Get colour from the palette that is closest to the required colour.
+	float4 result = GetClosestPaletteColour(float4(r, g, b, 1.0));
+
+	Result[float2(xo, yo)] = result;
+	//Result[float2(xo, yo)] = c;
+	//Result[float2(xo, yo)] = factor;
+}

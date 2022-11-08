@@ -1,0 +1,8 @@
+Library/*
+Logs/*
+Packages/*
+Temp/*
+UserSettings/*
+
+*.swp
+*/**/.swp
